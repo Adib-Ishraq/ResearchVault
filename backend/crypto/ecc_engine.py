@@ -11,8 +11,6 @@ import os
 import base64
 import json
 import struct
-from .hash_engine import sha256
-from .hmac_engine import hmac_sha256
 
 # ─── NIST P-256 curve parameters ─────────────────────────────────────────────
 # y² = x³ + ax + b  (mod p)
@@ -136,93 +134,93 @@ def generate_ecc_keypair() -> tuple[ECCPublicKey, ECCPrivateKey]:
             return pub, priv
 
 
-# ─── ECDH ─────────────────────────────────────────────────────────────────────
+# ─── Point encoding for EC ElGamal ───────────────────────────────────────────
+# Koblitz-style embedding: 30 bytes of plaintext into a P-256 point.
+# x = m_int * 256 + attempt, where the low 8 bits are the attempt counter.
+# P-256 satisfies p ≡ 3 (mod 4), so square roots are pow(y_sq, (p+1)//4, p).
 
-def ecdh_shared_secret(private_key: ECCPrivateKey, peer_public_key: ECCPublicKey) -> bytes:
-    """Compute ECDH shared secret: private_key * peer_public_key → x-coordinate."""
-    shared_point = _scalar_mult(private_key.scalar, peer_public_key.point)
-    if shared_point is _INF:
-        raise ValueError("ECDH produced point at infinity")
-    x, _ = shared_point
-    return x.to_bytes(32, "big")
+_CHUNK_BYTES = 30
 
 
-# ─── KDF (ANSI X9.63 / SP 800-56A style with SHA-256) ────────────────────────
-
-def _kdf(shared_secret: bytes, info: bytes = b"ECIES", key_len: int = 32) -> bytes:
-    """Derive key material from shared secret using SHA-256."""
-    result = b""
-    counter = 1
-    while len(result) < key_len:
-        result += sha256(shared_secret + struct.pack(">I", counter) + info)
-        counter += 1
-    return result[:key_len]
-
-
-# ─── XOR stream cipher using derived key ─────────────────────────────────────
-
-def _keystream(key: bytes, nonce: bytes, length: int) -> bytes:
-    """Generate keystream for XOR cipher: SHA-256-based CTR mode."""
-    stream = b""
-    block = 0
-    while len(stream) < length:
-        stream += sha256(key + nonce + struct.pack(">I", block))
-        block += 1
-    return stream[:length]
+def _point_from_bytes(data: bytes) -> tuple:
+    """Embed up to 30 bytes as a P-256 point using Koblitz-style encoding."""
+    m_int = int.from_bytes(data.ljust(_CHUNK_BYTES, b'\x00'), 'big')
+    for attempt in range(256):
+        x = m_int * 256 + attempt
+        if x >= _P:
+            continue
+        y_sq = (x * x * x + _A * x + _B) % _P
+        y = pow(y_sq, (_P + 1) // 4, _P)
+        if (y * y) % _P == y_sq:
+            return (x, y)
+    raise ValueError("Could not encode data as a P-256 point in 256 attempts")
 
 
-# ─── ECIES Encrypt / Decrypt ──────────────────────────────────────────────────
+def _bytes_from_point(point: tuple) -> bytes:
+    """Recover 30 bytes from a point encoded by _point_from_bytes."""
+    x, _ = point
+    return (x >> 8).to_bytes(_CHUNK_BYTES, 'big')
+
+
+def _point_negate(P) -> tuple:
+    """Return the additive inverse of P on P-256: (x, -y mod p)."""
+    if P is _INF:
+        return _INF
+    return (P[0], (_P - P[1]) % _P)
+
+
+# ─── Pure EC ElGamal Encrypt / Decrypt ───────────────────────────────────────
+# No symmetric cipher used. Each 30-byte chunk of plaintext is encoded as a
+# P-256 point M, then encrypted as (C1, C2) = (r*G, M + r*Q).
+# Decryption: M = C2 - priv*C1  (since Q = priv*G → r*Q = priv*r*G = priv*C1).
 
 def ecies_encrypt(recipient_public_key: ECCPublicKey, plaintext: bytes) -> bytes:
     """
-    ECIES encryption:
-      1. Generate ephemeral keypair
-      2. ECDH → shared secret
-      3. KDF → encryption key + MAC key
-      4. XOR-stream encrypt plaintext
-      5. HMAC-SHA256 over ciphertext
-    Output format: [ephemeral_x(32)] + [ephemeral_y(32)] + [nonce(16)] + [ciphertext] + [mac(32)]
+    Pure EC ElGamal encryption — no symmetric cipher.
+    Splits plaintext into 30-byte chunks; each chunk is encoded as a P-256
+    point M and encrypted as (C1=r*G, C2=M+r*Q) with a fresh random r.
+    Output: [4B num_chunks] || per-chunk([1B data_len][64B C1][64B C2])
     """
-    eph_pub, eph_priv = generate_ecc_keypair()
-    shared = ecdh_shared_secret(eph_priv, recipient_public_key)
-
-    enc_key = _kdf(shared, b"ENC", 32)
-    mac_key = _kdf(shared, b"MAC", 32)
-
-    nonce = os.urandom(16)
-    stream = _keystream(enc_key, nonce, len(plaintext))
-    ciphertext = bytes(a ^ b for a, b in zip(plaintext, stream))
-
-    mac = hmac_sha256(mac_key, nonce + ciphertext)
-
-    eph_x = eph_pub.point[0].to_bytes(32, "big")
-    eph_y = eph_pub.point[1].to_bytes(32, "big")
-    return eph_x + eph_y + nonce + ciphertext + mac
+    chunks = [plaintext[i:i + _CHUNK_BYTES] for i in range(0, len(plaintext), _CHUNK_BYTES)]
+    result = struct.pack(">I", len(chunks))
+    for chunk in chunks:
+        M = _point_from_bytes(chunk)
+        r = int.from_bytes(os.urandom(32), 'big') % _N
+        while r == 0:
+            r = int.from_bytes(os.urandom(32), 'big') % _N
+        C1 = _scalar_mult(r, _G)
+        C2 = _point_add(M, _scalar_mult(r, recipient_public_key.point))
+        result += struct.pack(">B", len(chunk))
+        result += C1[0].to_bytes(32, 'big') + C1[1].to_bytes(32, 'big')
+        result += C2[0].to_bytes(32, 'big') + C2[1].to_bytes(32, 'big')
+    return result
 
 
 def ecies_decrypt(private_key: ECCPrivateKey, blob: bytes) -> bytes:
-    """Decrypt ECIES blob produced by ecies_encrypt."""
-    if len(blob) < 32 + 32 + 16 + 32:
-        raise ValueError("ECIES blob too short")
-
-    eph_x = int.from_bytes(blob[0:32], "big")
-    eph_y = int.from_bytes(blob[32:64], "big")
-    nonce = blob[64:80]
-    ciphertext = blob[80:-32]
-    mac = blob[-32:]
-
-    eph_pub = ECCPublicKey((eph_x, eph_y))
-    shared = ecdh_shared_secret(private_key, eph_pub)
-
-    enc_key = _kdf(shared, b"ENC", 32)
-    mac_key = _kdf(shared, b"MAC", 32)
-
-    expected_mac = hmac_sha256(mac_key, nonce + ciphertext)
-    if expected_mac != mac:
-        raise ValueError("ECIES MAC verification failed — data tampered")
-
-    stream = _keystream(enc_key, nonce, len(ciphertext))
-    return bytes(a ^ b for a, b in zip(ciphertext, stream))
+    """
+    Pure EC ElGamal decryption.
+    M = C2 - priv*C1 = (M + r*Q) - priv*(r*G) = M + r*priv*G - priv*r*G = M.
+    """
+    offset = 0
+    num_chunks = struct.unpack_from(">I", blob, offset)[0]
+    offset += 4
+    plaintext = b""
+    for _ in range(num_chunks):
+        chunk_len = struct.unpack_from(">B", blob, offset)[0]
+        offset += 1
+        C1 = (
+            int.from_bytes(blob[offset:offset + 32], 'big'),
+            int.from_bytes(blob[offset + 32:offset + 64], 'big'),
+        )
+        offset += 64
+        C2 = (
+            int.from_bytes(blob[offset:offset + 32], 'big'),
+            int.from_bytes(blob[offset + 32:offset + 64], 'big'),
+        )
+        offset += 64
+        M = _point_add(C2, _point_negate(_scalar_mult(private_key.scalar, C1)))
+        plaintext += _bytes_from_point(M)[:chunk_len]
+    return plaintext
 
 
 # ─── Base64 serialization ─────────────────────────────────────────────────────

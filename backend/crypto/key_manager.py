@@ -13,7 +13,7 @@ from .rsa_engine import (
     RSAPublicKey, RSAPrivateKey,
     generate_rsa_keypair,
     rsa_encrypt, rsa_decrypt,
-    rsa_hybrid_encrypt, rsa_hybrid_decrypt,
+    rsa_encrypt_large, rsa_decrypt_large,
     serialize_public_key, deserialize_public_key,
     serialize_private_key, deserialize_private_key,
 )
@@ -111,7 +111,7 @@ def generate_user_keys() -> dict:
         "ecc_priv": serialize_ecc_private_key(ecc_priv),
     }).encode()
 
-    wrapped = rsa_hybrid_encrypt(master.rsa_pub, bundle)
+    wrapped = rsa_encrypt_large(master.rsa_pub, bundle)
     wrapped_b64 = base64.b64encode(wrapped).decode()
 
     return {
@@ -126,7 +126,7 @@ def unwrap_user_private_keys(private_key_enc: str) -> tuple[RSAPrivateKey, ECCPr
     """Decrypt and return a user's RSA and ECC private keys."""
     master = get_master()
     wrapped = base64.b64decode(private_key_enc)
-    bundle_bytes = rsa_hybrid_decrypt(master.rsa_priv, wrapped)
+    bundle_bytes = rsa_decrypt_large(master.rsa_priv, wrapped)
     bundle = json.loads(bundle_bytes.decode())
     rsa_priv = deserialize_private_key(bundle["rsa_priv"])
     ecc_priv = deserialize_ecc_private_key(bundle["ecc_priv"])
@@ -196,7 +196,7 @@ def rotate_user_keys(old_private_key_enc: str) -> dict:
         "ecc_priv": serialize_ecc_private_key(new_ecc_priv),
     }).encode()
 
-    wrapped = rsa_encrypt(master.rsa_pub, bundle)
+    wrapped = rsa_encrypt_large(master.rsa_pub, bundle)
     wrapped_b64 = base64.b64encode(wrapped).decode()
 
     return {

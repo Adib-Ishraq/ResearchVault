@@ -10,7 +10,6 @@ No standard library crypto (no cryptography, no rsa, no Crypto.*) used.
 import os
 import struct
 from .hash_engine import sha256
-from .hmac_engine import hmac_sha256
 
 
 # ─── Modular arithmetic helpers ───────────────────────────────────────────────
@@ -306,54 +305,35 @@ def rsa_decrypt(private_key: RSAPrivateKey, ciphertext: bytes) -> bytes:
     return _oaep_unpad(em)
 
 
-# ─── Hybrid Encrypt / Decrypt (RSA-OAEP + CTR-HMAC) ─────────────────────────
-# Used when plaintext exceeds OAEP limit (190 bytes for RSA-2048 with SHA-256).
-# Format: [rsa_wrapped_key(256)] + [nonce(16)] + [ciphertext(n)] + [mac(32)]
+# ─── Large plaintext encrypt / decrypt (Chunked RSA-OAEP) ────────────────────
+# Purely asymmetric: plaintext is split into 190-byte blocks and each block is
+# independently RSA-OAEP encrypted. No symmetric cipher or derived key used.
+# Format: [4B num_chunks] || ( [2B ct_len] + [256B RSA ciphertext] ) * n
 
-def _ctr_keystream(key: bytes, nonce: bytes, length: int) -> bytes:
-    stream = b""
-    block = 0
-    while len(stream) < length:
-        stream += sha256(key + nonce + struct.pack(">I", block))
-        block += 1
-    return stream[:length]
-
-
-def rsa_hybrid_encrypt(public_key: RSAPublicKey, plaintext: bytes) -> bytes:
-    """Encrypt arbitrarily large plaintext: RSA-OAEP wraps a 32-byte CEK,
-    then CTR-mode + HMAC-SHA256 encrypts the plaintext."""
-    cek = os.urandom(32)
-    mac_key = sha256(cek + b"MAC")
-    wrapped_cek = rsa_encrypt(public_key, cek)
-
-    nonce = os.urandom(16)
-    stream = _ctr_keystream(cek, nonce, len(plaintext))
-    ciphertext = bytes(a ^ b for a, b in zip(plaintext, stream))
-    mac = hmac_sha256(mac_key, nonce + ciphertext)
-
-    return wrapped_cek + nonce + ciphertext + mac
+def rsa_encrypt_large(public_key: RSAPublicKey, plaintext: bytes) -> bytes:
+    """Encrypt arbitrarily large plaintext using chunked RSA-OAEP. Purely asymmetric."""
+    chunk_size = public_key.n_bytes - 2 * _HASH_LEN - 2  # 190 bytes for RSA-2048/SHA-256
+    chunks = [plaintext[i:i + chunk_size] for i in range(0, len(plaintext), chunk_size)]
+    result = struct.pack(">I", len(chunks))
+    for chunk in chunks:
+        ct = rsa_encrypt(public_key, chunk)
+        result += struct.pack(">H", len(ct)) + ct
+    return result
 
 
-def rsa_hybrid_decrypt(private_key: RSAPrivateKey, blob: bytes) -> bytes:
-    """Decrypt blob produced by rsa_hybrid_encrypt."""
-    key_len = private_key.n_bytes
-    if len(blob) < key_len + 16 + 32:
-        raise ValueError("Hybrid blob too short")
-
-    wrapped_cek = blob[:key_len]
-    nonce = blob[key_len:key_len + 16]
-    ciphertext = blob[key_len + 16:-32]
-    mac = blob[-32:]
-
-    cek = rsa_decrypt(private_key, wrapped_cek)
-    mac_key = sha256(cek + b"MAC")
-
-    expected_mac = hmac_sha256(mac_key, nonce + ciphertext)
-    if expected_mac != mac:
-        raise ValueError("Hybrid decrypt: MAC verification failed")
-
-    stream = _ctr_keystream(cek, nonce, len(ciphertext))
-    return bytes(a ^ b for a, b in zip(ciphertext, stream))
+def rsa_decrypt_large(private_key: RSAPrivateKey, blob: bytes) -> bytes:
+    """Decrypt blob produced by rsa_encrypt_large."""
+    offset = 0
+    num_chunks = struct.unpack_from(">I", blob, offset)[0]
+    offset += 4
+    plaintext = b""
+    for _ in range(num_chunks):
+        ct_len = struct.unpack_from(">H", blob, offset)[0]
+        offset += 2
+        ct = blob[offset:offset + ct_len]
+        offset += ct_len
+        plaintext += rsa_decrypt(private_key, ct)
+    return plaintext
 
 
 # ─── Sign / Verify (PSS) ──────────────────────────────────────────────────────
