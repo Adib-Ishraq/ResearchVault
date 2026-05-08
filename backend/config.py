@@ -21,9 +21,8 @@ class Config:
     # Redis (Upstash)
     REDIS_URL = os.environ["REDIS_URL"]
 
-    # Gmail SMTP (email / OTP)
-    GMAIL_USER = os.environ["GMAIL_USER"]
-    GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
+    # Brevo HTTP API (email / OTP)
+    BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
 
     # JWT
     JWT_SECRET = os.environ["JWT_SECRET"]
