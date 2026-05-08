@@ -1,26 +1,35 @@
 """
-Email delivery via Resend HTTP API for OTP and notification emails.
+Email delivery via Brevo HTTP API for OTP and notification emails.
 """
 
 import os
 import random
 import string
-import resend
+import requests
 from flask import current_app
 
+_BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 
-def _send_via_resend(to: str, subject: str, html: str) -> bool:
-    resend.api_key = os.environ.get("RESEND_API_KEY", "")
+
+def _send_via_brevo(to: str, subject: str, html: str) -> bool:
+    api_key = os.environ.get("BREVO_API_KEY", "")
+    payload = {
+        "sender": {"name": "Research Vault", "email": "ikadib10@gmail.com"},
+        "to": [{"email": to}],
+        "subject": subject,
+        "htmlContent": html,
+    }
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "api-key": api_key,
+    }
     try:
-        resend.Emails.send({
-            "from": "Research Vault <onboarding@resend.dev>",
-            "to": [to],
-            "subject": subject,
-            "html": html,
-        })
+        resp = requests.post(_BREVO_URL, json=payload, headers=headers, timeout=10)
+        resp.raise_for_status()
         return True
     except Exception as e:
-        current_app.logger.error("Resend send failed: %s", e)
+        current_app.logger.error("Brevo send failed: %s", e)
         return False
 
 
@@ -44,4 +53,4 @@ def send_otp_email(to_email: str, otp: str, purpose: str = "login") -> bool:
       </p>
     </div>
     """
-    return _send_via_resend(to_email, subject, html)
+    return _send_via_brevo(to_email, subject, html)
