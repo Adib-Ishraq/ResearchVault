@@ -34,6 +34,7 @@ def create_app(config_class=Config) -> Flask:
     from modules.rooms.routes import rooms_bp
     from modules.notifications.routes import notifications_bp
     from modules.messages.routes import messages_bp
+    from modules.appointments.routes import appointments_bp
     from modules.ai.routes import ai_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -42,6 +43,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(rooms_bp, url_prefix="/api/rooms")
     app.register_blueprint(notifications_bp, url_prefix="/api/notifications")
     app.register_blueprint(messages_bp, url_prefix="/api/messages")
+    app.register_blueprint(appointments_bp, url_prefix="/api/appointments")
     app.register_blueprint(ai_bp, url_prefix="/api/ai")
 
     @app.get("/api/health")

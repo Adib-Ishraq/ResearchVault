@@ -240,12 +240,35 @@ ALTER TABLE credential_verifications ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "service_role_all_credential_verifications" ON credential_verifications
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
--- Extend notification type enum to include credential events.
--- Drop the old constraint (PostgreSQL names it <table>_<column>_check by default)
--- and recreate with the two new types.
+-- Extend notification type enum to include credential + appointment events.
 ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
 ALTER TABLE notifications ADD CONSTRAINT notifications_type_check CHECK (type IN (
   'supervision_request', 'supervision_accepted', 'supervision_rejected',
-  'room_invite', 'connection_request', 'connection_accepted',
-  'credential_verification_request', 'credential_verified'
+  'room_invite', 'room_announcement',
+  'connection_request', 'connection_accepted',
+  'credential_verification_request', 'credential_verified',
+  'appointment_request', 'appointment_approved', 'appointment_rejected'
 ));
+
+-- ─── Appointments ──────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS appointments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  supervisor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title_enc TEXT NOT NULL,              -- ECIES-encrypted appointment purpose
+  note_enc TEXT,                        -- ECIES-encrypted student note (optional)
+  proposed_times JSONB NOT NULL DEFAULT '[]', -- array of ISO datetime strings (plaintext)
+  status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')) DEFAULT 'pending',
+  confirmed_time TIMESTAMPTZ,           -- supervisor sets this on approval
+  supervisor_note_enc TEXT,             -- ECIES-encrypted supervisor response note
+  hmac TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_appointments_student ON appointments(student_id);
+CREATE INDEX IF NOT EXISTS idx_appointments_supervisor ON appointments(supervisor_id, status);
+
+ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "service_role_all_appointments" ON appointments FOR ALL TO service_role USING (true) WITH CHECK (true);

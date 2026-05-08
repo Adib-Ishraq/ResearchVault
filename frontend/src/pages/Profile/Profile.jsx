@@ -5,6 +5,104 @@ import Layout from "../../components/Layout";
 import api from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 
+function BookAppointmentForm({ supervisorId, onSuccess }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [note, setNote] = useState("");
+  const [times, setTimes] = useState([""]);
+  const [error, setError] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.post("/appointments/", {
+        supervisor_id: supervisorId,
+        title,
+        note,
+        proposed_times: times.filter((t) => t),
+      }),
+    onSuccess: () => {
+      setOpen(false);
+      setTitle(""); setNote(""); setTimes([""]);
+      onSuccess("Appointment request sent!");
+    },
+    onError: (e) => setError(e.response?.data?.error || "Failed to send request"),
+  });
+
+  const addSlot = () => times.length < 3 && setTimes([...times, ""]);
+  const updateSlot = (i, v) => setTimes(times.map((t, idx) => (idx === i ? v : t)));
+  const removeSlot = (i) => setTimes(times.filter((_, idx) => idx !== i));
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="btn-secondary text-sm mt-2"
+      >
+        Book Appointment
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-4 p-4 border border-border rounded-xl bg-gray-50 space-y-3">
+      <p className="text-sm font-semibold text-text">Book an Appointment</p>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <div>
+        <label className="text-xs text-muted font-medium">Purpose / Title</label>
+        <input
+          className="input text-sm mt-1"
+          placeholder="e.g. Discuss thesis proposal"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+      </div>
+      <div>
+        <label className="text-xs text-muted font-medium">Proposed Time Slots (up to 3)</label>
+        <div className="space-y-1.5 mt-1">
+          {times.map((t, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                type="datetime-local"
+                className="input text-sm flex-1"
+                value={t}
+                onChange={(e) => updateSlot(i, e.target.value)}
+              />
+              {times.length > 1 && (
+                <button onClick={() => removeSlot(i)} className="text-muted hover:text-danger text-lg leading-none">×</button>
+              )}
+            </div>
+          ))}
+        </div>
+        {times.length < 3 && (
+          <button onClick={addSlot} className="text-xs text-accent hover:underline mt-1">
+            + Add another time slot
+          </button>
+        )}
+      </div>
+      <div>
+        <label className="text-xs text-muted font-medium">Note (optional)</label>
+        <textarea
+          className="input text-sm resize-none mt-1"
+          rows={2}
+          placeholder="Any details you'd like to share…"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending || !title || !times.filter(Boolean).length}
+          className="btn-primary text-sm disabled:opacity-50"
+        >
+          {mutation.isPending ? "Sending…" : "Send Request"}
+        </button>
+        <button onClick={() => setOpen(false)} className="btn-secondary text-sm">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 function VerificationBadge({ verification }) {
   const [hovered, setHovered] = useState(false);
   if (!verification || verification.status !== "verified") {
@@ -167,6 +265,13 @@ export default function Profile() {
             )}
 
             {/* Action buttons */}
+            {isSupervisor && isStudent && !studentBlocked && (
+              <BookAppointmentForm
+                supervisorId={userId}
+                onSuccess={(msg) => setActionMsg(msg)}
+              />
+            )}
+
             {isSupervisor && isStudent && (
               <div className="mt-4">
                 {supervisionStatus === "accepted" ? (

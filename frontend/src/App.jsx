@@ -12,6 +12,7 @@ import Discover from "./pages/Discover/Discover";
 import Room from "./pages/Room/Room";
 import RoomList from "./pages/Room/RoomList";
 import Messages from "./pages/Messages/Messages";
+import Appointments from "./pages/Appointments/Appointments";
 
 function PrivateRoute({ children }) {
   const token = useAuthStore((s) => s.accessToken);
@@ -39,6 +40,7 @@ export default function App() {
       <Route path="/rooms" element={<PrivateRoute><RoomList /></PrivateRoute>} />
       <Route path="/rooms/:roomId" element={<PrivateRoute><Room /></PrivateRoute>} />
       <Route path="/messages" element={<PrivateRoute><Messages /></PrivateRoute>} />
+      <Route path="/appointments" element={<PrivateRoute><Appointments /></PrivateRoute>} />
 
       {/* Fallback */}
       <Route path="/" element={<Navigate to="/dashboard" replace />} />

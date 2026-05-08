@@ -54,6 +54,7 @@ export default function Layout({ children }) {
             {navLink("/discover", "Discover")}
             {navLink("/rooms", "Rooms")}
             {navLink("/messages", "Messages")}
+            {navLink("/appointments", "Appointments")}
           </nav>
 
           <div className="flex items-center gap-1">
