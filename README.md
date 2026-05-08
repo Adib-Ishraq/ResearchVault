@@ -40,7 +40,7 @@ All cryptographic primitives — SHA-256, RSA-2048, ECC P-256, HMAC-SHA256, PBKD
 - **Role-based access control** — Supervisor, Postgraduate, Undergraduate roles enforced at every API endpoint
 
 ### Research Rooms
-- **Encrypted workspaces** — Every room post is ECIES-encrypted per member using that member's ECC public key; only current members can decrypt content
+- **Encrypted workspaces** — Every room post is EC ElGamal encrypted per member using that member's ECC public key; only current members can decrypt content
 - **Sections** — Four tabs: Updates, Data, Results, and Announcements
 - **Post editing** — Authors can edit their own posts; content is re-encrypted for all current members on save
 - **Announcements** — Supervisor-only broadcast with automatic in-app notification to all members
@@ -84,7 +84,8 @@ All cryptographic primitives — SHA-256, RSA-2048, ECC P-256, HMAC-SHA256, PBKD
 │                                                                 │
 │  ┌────────────────────────────────────────────────────────────┐ │
 │  │                  Custom Crypto Layer                        │ │
-│  │  SHA-256 · PBKDF2 · HMAC-SHA256 · RSA-2048 · ECC P-256     │ │
+│  │  SHA-256 · PBKDF2-SHA256 · HMAC-SHA256                     │ │
+│  │  RSA-2048 OAEP/PSS · ECC P-256 EC ElGamal                  │ │
 │  └────────────────────────────────────────────────────────────┘ │
 │                                                                 │
 │  /auth   /rooms   /messages   /notifications   /ai   /users    │
@@ -151,30 +152,38 @@ Every cryptographic operation is implemented from scratch. No `hashlib`, `hmac`,
 | SHA-256 | `crypto/hash_engine.py` | Full FIPS 180-4 — compression function, padding, digest |
 | PBKDF2 | `crypto/hash_engine.py` | RFC 2898 PBKDF2 using custom HMAC-SHA256 as PRF |
 | HMAC-SHA256 | `crypto/hmac_engine.py` | RFC 2104 HMAC built on custom SHA-256 |
-| RSA-2048 | `crypto/rsa_engine.py` | Miller-Rabin primality, extended GCD, OAEP, PSS signing |
-| ECC P-256 | `crypto/ecc_engine.py` | Affine point arithmetic, ECDH, ECIES encrypt/decrypt |
-| Key Manager | `crypto/key_manager.py` | Server master keys, user keypair generation, field encryption |
+| RSA-2048 | `crypto/rsa_engine.py` | Miller-Rabin primality, extended GCD, OAEP encrypt/decrypt, PSS sign/verify, chunked large-data encrypt |
+| ECC P-256 | `crypto/ecc_engine.py` | Affine point arithmetic, scalar multiplication, Koblitz point encoding, EC ElGamal encrypt/decrypt |
+| Key Manager | `crypto/key_manager.py` | Server master keys, user keypair generation/rotation, field encryption, room key wrapping |
 
-### How post encryption works (ECIES per-member)
+### How post encryption works (EC ElGamal per-member)
 
-Each room post is encrypted individually for every current room member:
+Each room post is encrypted individually for every current room member using **pure EC ElGamal** — no symmetric cipher, no XOR stream, no derived key. Plaintext is embedded directly as elliptic curve points.
 
+**Plaintext-to-point encoding (Koblitz-style):**
+Each 30-byte chunk is embedded into a P-256 point:
 ```
-POST ENCRYPTION — for each member:
-  1. Generate ephemeral ECC P-256 keypair
-  2. ECDH(ephemeral_priv, member_ecc_pub)  →  shared_secret
-  3. SHA-256(shared_secret)               →  symmetric_key
-  4. XOR-encrypt post content             →  ciphertext
-  5. Store {user_id: base64(ciphertext)} in room_posts.content_enc
-
-POST DECRYPTION — for the requesting user:
-  1. Look up their ciphertext in the JSON map
-  2. ECDH(member_ecc_priv, ephemeral_pub)  →  shared_secret
-  3. SHA-256(shared_secret)               →  symmetric_key
-  4. XOR-decrypt ciphertext               →  plaintext
+x = m_int * 256 + attempt   (attempt = 0..255, stored in low 8 bits of x)
+y = pow(x³ + ax + b, (p+1)//4, p)   — exact square root, valid since P-256 has p ≡ 3 (mod 4)
 ```
 
-This guarantees that only current members can read posts. When a member is removed, new posts automatically exclude them because `_ecies_encrypt_for_members()` queries the live `room_members` table at write time.
+**Encryption — for each member, for each 30-byte chunk:**
+```
+r  ←  random scalar
+C1 = r · G          (G = P-256 generator)
+C2 = M + r · Q      (M = encoded plaintext point, Q = member ECC public key)
+Store {user_id: base64([num_chunks][chunk_len][C1][C2]...)} in content_enc
+```
+
+**Decryption — for the requesting user:**
+```
+M = C2 − priv · C1
+    = (M + r·Q) − priv·(r·G)
+    = M + r·priv·G − priv·r·G  =  M
+plaintext = x-coordinate of M >> 8  (strips the attempt counter byte)
+```
+
+No shared key, no symmetric cipher. Each member's ciphertext is fully independent. Removing a member automatically excludes them from all future encryptions because the encryption loop queries the live `room_members` table at write time.
 
 ### Record integrity
 
@@ -198,7 +207,7 @@ research-vault/
 │   │   ├── hash_engine.py        # SHA-256, PBKDF2-SHA256, hash_password, verify_password
 │   │   ├── hmac_engine.py        # HMAC-SHA256, compute_record_hmac, verify_record_hmac
 │   │   ├── rsa_engine.py         # RSA-2048 — keygen, OAEP encrypt/decrypt, PSS sign/verify
-│   │   ├── ecc_engine.py         # ECC P-256 — point arithmetic, ECDH, ECIES encrypt/decrypt
+│   │   ├── ecc_engine.py         # ECC P-256 — point arithmetic, Koblitz encoding, EC ElGamal encrypt/decrypt
 │   │   └── key_manager.py        # ServerMasterKeys, generate_user_keys, encrypt_field, decrypt_field
 │   │
 │   ├── middleware/
@@ -395,7 +404,7 @@ VITE_API_URL=http://localhost:5000/api
 
 ### Generating Master Keys
 
-The server requires a long-lived RSA-2048 keypair (JWT signing, room key wrapping) and an ECC P-256 keypair (field encryption). Generate them once:
+The server requires a long-lived RSA-2048 keypair (JWT signing, private key wrapping, room key wrapping) and an ECC P-256 keypair (EC ElGamal field and post encryption). Generate them once:
 
 ```bash
 cd backend
@@ -459,10 +468,10 @@ The script prints the four `SERVER_*` env vars. Paste them into your `.env`.
 Passwords are hashed with a custom **PBKDF2-SHA256** implementation using a random 32-byte salt per user. The plaintext password is never stored or logged anywhere.
 
 ### Email privacy
-Emails are never stored in plaintext. A **SHA-256 hash** of the email is stored in `email_hash` for fast duplicate-checking and lookup. The actual email address is stored only in the `email_enc` column, ECIES-encrypted with the server ECC master public key.
+Emails are never stored in plaintext. A **SHA-256 hash** of the email is stored in `email_hash` for fast duplicate-checking and lookup. The actual email address is stored only in the `email_enc` column, encrypted with **EC ElGamal** using the server ECC master public key.
 
 ### Field-level encryption
-All PII fields (username, email, contact, university) are encrypted with **ECIES** before being written to the database. Only the server (holding the master ECC private key) can decrypt them.
+All PII fields (username, email, contact, university) and room metadata (title, description) are encrypted with **ECC P-256 EC ElGamal** before being written to the database. Only the server (holding the master ECC private key) can decrypt them. No symmetric cipher is used at any point.
 
 ### JWT tokens
 - Access tokens are **RSA-2048 signed** (custom PSS implementation), expire after 15 minutes
@@ -471,7 +480,7 @@ All PII fields (username, email, contact, university) are encrypted with **ECIES
 - Tokens are fingerprinted with IP + User-Agent; mismatches trigger re-authentication
 
 ### Post encryption
-Room posts use **ECIES per-member encryption** — each member gets their own encrypted copy, keyed to their ECC public key. There is no shared symmetric content key. Removing a member immediately stops them from being included in new post encryptions.
+Room posts use **EC ElGamal per-member encryption** — each member gets their own independent encrypted copy, tied to their ECC public key. There is no shared key and no symmetric cipher anywhere in the pipeline. Removing a member immediately stops them from being included in new post encryptions.
 
 ### Record integrity
 Every database row (users, rooms, posts) includes an **HMAC-SHA256** over its encrypted fields, signed with a server secret. Any direct database tampering is detectable at the application layer.
