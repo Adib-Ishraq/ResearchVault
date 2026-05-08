@@ -117,7 +117,7 @@ def _prf(key: bytes, data: bytes) -> bytes:
     return sha256(o_key + sha256(i_key + data))
 
 
-def pbkdf2_sha256(password: bytes, salt: bytes, iterations: int = 100_000, dklen: int = 32) -> bytes:
+def pbkdf2_sha256(password: bytes, salt: bytes, iterations: int = 1_000, dklen: int = 32) -> bytes:
     """
     PBKDF2 with HMAC-SHA256 PRF.
     Returns dklen bytes of derived key material.
