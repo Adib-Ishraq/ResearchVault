@@ -1,33 +1,26 @@
 """
-Email delivery via Gmail SMTP for OTP and notification emails.
+Email delivery via Resend HTTP API for OTP and notification emails.
 """
 
 import os
 import random
 import string
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import resend
 from flask import current_app
 
 
-def _send_via_gmail(to: str, subject: str, html: str) -> bool:
-    gmail_user = os.environ.get("GMAIL_USER") or current_app.config.get("GMAIL_USER", "")
-    gmail_password = os.environ.get("GMAIL_APP_PASSWORD") or current_app.config.get("GMAIL_APP_PASSWORD", "")
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = f"Research Vault <{gmail_user}>"
-    msg["To"] = to
-    msg.attach(MIMEText(html, "html"))
-
+def _send_via_resend(to: str, subject: str, html: str) -> bool:
+    resend.api_key = os.environ.get("RESEND_API_KEY", "")
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(gmail_user, gmail_password)
-            smtp.sendmail(gmail_user, to, msg.as_string())
+        resend.Emails.send({
+            "from": "Research Vault <onboarding@resend.dev>",
+            "to": [to],
+            "subject": subject,
+            "html": html,
+        })
         return True
     except Exception as e:
-        current_app.logger.error("Gmail SMTP send failed: %s", e)
+        current_app.logger.error("Resend send failed: %s", e)
         return False
 
 
@@ -51,4 +44,4 @@ def send_otp_email(to_email: str, otp: str, purpose: str = "login") -> bool:
       </p>
     </div>
     """
-    return _send_via_gmail(to_email, subject, html)
+    return _send_via_resend(to_email, subject, html)
