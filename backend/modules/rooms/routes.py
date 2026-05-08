@@ -172,6 +172,39 @@ def join_room():
     return jsonify({"message": "Joined room", "room_id": room_id}), 200
 
 
+# ─── Remove a member (supervisor only) ───────────────────────────────────────
+
+@rooms_bp.delete("/<room_id>/members/<user_id>")
+@require_auth
+def remove_member(room_id: str, user_id: str):
+    db = get_supabase()
+
+    membership = db.table("room_members").select("role").eq(
+        "room_id", room_id
+    ).eq("user_id", g.user_id).execute()
+    if not membership.data:
+        return jsonify({"error": "Not a room member"}), 403
+    if membership.data[0]["role"] != "supervisor":
+        return jsonify({"error": "Only supervisors can remove members"}), 403
+
+    if user_id == g.user_id:
+        return jsonify({"error": "Cannot remove yourself"}), 400
+
+    room = db.table("research_rooms").select("supervisor_id").eq("id", room_id).execute()
+    if room.data and room.data[0]["supervisor_id"] == user_id:
+        return jsonify({"error": "Cannot remove the supervisor"}), 400
+
+    target = db.table("room_members").select("id").eq(
+        "room_id", room_id
+    ).eq("user_id", user_id).execute()
+    if not target.data:
+        return jsonify({"error": "Member not found"}), 404
+
+    db.table("room_members").delete().eq("room_id", room_id).eq("user_id", user_id).execute()
+
+    return jsonify({"message": "Member removed"}), 200
+
+
 # ─── Get room detail ──────────────────────────────────────────────────────────
 
 @rooms_bp.get("/<room_id>")

@@ -100,6 +100,11 @@ export default function Room() {
     },
   });
 
+  const removeMemberMutation = useMutation({
+    mutationFn: (userId) => api.delete(`/rooms/${roomId}/members/${userId}`),
+    onSuccess: () => qc.invalidateQueries(["room", roomId]),
+  });
+
   const handleImagePick = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -151,6 +156,18 @@ export default function Room() {
                   <span className="text-xs text-text">{m.username}</span>
                   {m.room_role === "supervisor" && (
                     <span className="text-xs text-accent">·&nbsp;Supervisor</span>
+                  )}
+                  {isSupervisor && m.room_role !== "supervisor" && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Remove ${m.username} from this room?`))
+                          removeMemberMutation.mutate(m.user_id);
+                      }}
+                      className="text-muted hover:text-danger text-xs leading-none ml-1"
+                      title={`Remove ${m.username}`}
+                    >
+                      ✕
+                    </button>
                   )}
                 </div>
               ))}
