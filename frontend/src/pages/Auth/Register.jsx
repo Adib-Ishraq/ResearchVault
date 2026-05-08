@@ -53,6 +53,8 @@ export default function Register() {
     role: "postgrad",
     university: "",
   });
+  const [step, setStep] = useState(1);
+  const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -80,7 +82,7 @@ export default function Register() {
         role: form.role,
         university: form.university,
       });
-      navigate("/login");
+      setStep(2);
     } catch (err) {
       setError(err.response?.data?.error || "Registration failed");
     } finally {
@@ -88,12 +90,120 @@ export default function Register() {
     }
   };
 
+  const handleVerify = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      await api.post("/auth/register/verify", { email: form.email, otp });
+      navigate("/login");
+    } catch (err) {
+      setError(err.response?.data?.error || "Verification failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setError("");
+    setOtp("");
+    setLoading(true);
+    try {
+      await api.post("/auth/register", {
+        username: form.username,
+        email: form.email,
+        password: form.password,
+        role: form.role,
+        university: form.university,
+      });
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to resend OTP");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logo = (
+    <div className="flex flex-col items-center mb-8">
+      <div className="w-11 h-11 rounded-2xl bg-accent flex items-center justify-center shadow-md mb-4">
+        <svg className="w-6 h-6 text-white" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M2 2a1 1 0 011-1h10a1 1 0 011 1v2H2V2zm-1 4h14v7a1 1 0 01-1 1H2a1 1 0 01-1-1V6zm5 2.5a.5.5 0 000 1h4a.5.5 0 000-1H6z" />
+        </svg>
+      </div>
+      <h1 className="text-2xl font-semibold text-text tracking-tight">Research Vault</h1>
+    </div>
+  );
+
+  if (step === 2) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4 py-12"
+        style={{ background: "radial-gradient(ellipse 80% 60% at 50% 0%, #E8F5F3 0%, #F7F7F5 55%)" }}>
+        <div className="w-full max-w-sm animate-fade-up">
+          {logo}
+          <div className="card shadow-card-hover">
+            <div className="flex flex-col items-center mb-6">
+              <div className="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center mb-3">
+                <svg className="w-6 h-6 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-semibold text-text">Verify your email</h2>
+              <p className="text-sm text-muted text-center mt-1">
+                We sent a 6-digit code to <span className="font-medium text-text">{form.email}</span>
+              </p>
+            </div>
+            <form onSubmit={handleVerify} className="space-y-4">
+              <div>
+                <label className="label">Verification code</label>
+                <input
+                  className="input text-center text-2xl tracking-widest font-mono"
+                  placeholder="000000"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  inputMode="numeric"
+                  maxLength={6}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              {error && (
+                <p className="text-danger text-sm bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                  {error}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || otp.length !== 6}
+                className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? "Verifying…" : "Verify & create account"}
+              </button>
+
+              <p className="text-center text-sm text-muted">
+                Didn't receive it?{" "}
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={loading}
+                  className="text-accent hover:text-accent-dark font-medium transition-colors disabled:opacity-50"
+                >
+                  Resend code
+                </button>
+              </p>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12"
       style={{ background: "radial-gradient(ellipse 80% 60% at 50% 0%, #E8F5F3 0%, #F7F7F5 55%)" }}>
       <div className="w-full max-w-sm animate-fade-up">
 
-        {/* Logo mark */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-11 h-11 rounded-2xl bg-accent flex items-center justify-center shadow-md mb-4">
             <svg className="w-6 h-6 text-white" viewBox="0 0 16 16" fill="currentColor">
@@ -168,7 +278,7 @@ export default function Register() {
               disabled={loading || !allRulesPassed || form.password !== form.confirmPassword}
               className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? "Creating account…" : "Create account"}
+              {loading ? "Sending code…" : "Continue"}
             </button>
 
             <p className="text-center text-sm text-muted">

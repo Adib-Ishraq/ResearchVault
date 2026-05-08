@@ -68,37 +68,72 @@ def register():
     email = data["email"].strip().lower()
     db = get_supabase()
 
-    # Check duplicate
     e_hash = _email_hash(email)
     existing = db.table("users").select("id").eq("email_hash", e_hash).execute()
     if existing.data:
         return jsonify({"error": "Email already registered"}), 409
 
-    # Hash password
     pw_hash, salt = hash_password(data["password"])
 
-    # Encrypt PII fields with server ECC master public key
-    username_enc = encrypt_field(data["username"])
-    email_enc = encrypt_field(email)
-    contact_enc = encrypt_field(data.get("contact", "")) if data.get("contact") else None
+    otp = generate_otp()
+    r = get_redis()
+    r.setex(f"reg_pending:{e_hash}", _OTP_TTL, json.dumps({
+        "otp": otp,
+        "email": email,
+        "username": data["username"],
+        "role": role,
+        "university": data.get("university", ""),
+        "contact": data.get("contact", ""),
+        "pw_hash": pw_hash,
+        "salt": salt,
+    }))
 
-    # Generate user cryptographic keypair
+    send_otp_email(email, otp, "registration")
+
+    return jsonify({"message": "OTP sent to your email"}), 200
+
+
+@auth_bp.post("/register/verify")
+def register_verify():
+    data = request.get_json(force=True)
+    email = data.get("email", "").strip().lower()
+    otp_input = data.get("otp", "")
+    if not email or not otp_input:
+        return jsonify({"error": "Email and OTP required"}), 400
+
+    e_hash = _email_hash(email)
+    r = get_redis()
+    stored = r.get(f"reg_pending:{e_hash}")
+    if not stored:
+        return jsonify({"error": "OTP expired or invalid"}), 400
+
+    pending = json.loads(stored)
+    if pending["otp"] != otp_input:
+        return jsonify({"error": "Incorrect OTP"}), 401
+
+    r.delete(f"reg_pending:{e_hash}")
+
+    db = get_supabase()
+
+    username_enc = encrypt_field(pending["username"])
+    email_enc = encrypt_field(email)
+    contact_enc = encrypt_field(pending["contact"]) if pending.get("contact") else None
+
     user_keys = generate_user_keys()
 
-    # Compute HMAC over all encrypted fields
     hmac_val = compute_record_hmac(
         _hmac_key(),
         username_enc, email_enc, contact_enc or "", user_keys["private_key_enc"]
     )
 
     user_row = {
-        "role": role,
+        "role": pending["role"],
         "username_enc": username_enc,
         "email_enc": email_enc,
         "email_hash": e_hash,
         "contact_enc": contact_enc,
-        "password_hash": pw_hash,
-        "salt": salt,
+        "password_hash": pending["pw_hash"],
+        "salt": pending["salt"],
         "public_key_rsa": user_keys["public_key_rsa"],
         "public_key_ecc": user_keys["public_key_ecc"],
         "private_key_enc": user_keys["private_key_enc"],
@@ -112,11 +147,10 @@ def register():
 
     user_id = result.data[0]["id"]
 
-    # Create empty profile row
     profile_row = {
         "user_id": user_id,
-        "university_plaintext": data.get("university", ""),
-        "university_enc": encrypt_field(data.get("university", "")) if data.get("university") else None,
+        "university_plaintext": pending.get("university", ""),
+        "university_enc": encrypt_field(pending["university"]) if pending.get("university") else None,
         "hmac": "",
     }
     db.table("profiles").insert(profile_row).execute()
