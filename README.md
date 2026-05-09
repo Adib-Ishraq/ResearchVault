@@ -515,10 +515,10 @@ All OTPs (registration, 2FA, password reset) are 6-digit numeric codes stored in
 
 ## Team
 
-| Member | Role | GitHub |
-|---|---|---|
-| Adib Ishraq | Backend & Cryptography | [@Adib-Ishraq](https://github.com/Adib-Ishraq) |
-| Mahzabin Sandria | Frontend & Integration | [@mahzabinsandria](https://github.com/mahzabinsandria) |
+| Member | GitHub |
+|---|---|
+| Adib Ishraq | [@Adib-Ishraq](https://github.com/Adib-Ishraq) |
+| Mahzabin Sandria | [@mahzabinsandria](https://github.com/mahzabinsandria) |
 
 ---
 
