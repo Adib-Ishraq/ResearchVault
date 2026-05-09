@@ -10,6 +10,7 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [showNotifs, setShowNotifs] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = async () => {
     try { await api.post("/auth/logout"); } catch {}
@@ -17,8 +18,22 @@ export default function Layout({ children }) {
     navigate("/login");
   };
 
-  const navLink = (to, label) => {
+  const navLink = (to, label, mobile = false) => {
     const active = location.pathname.startsWith(to);
+    if (mobile) {
+      return (
+        <Link
+          key={to}
+          to={to}
+          onClick={() => setMobileOpen(false)}
+          className={`block px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-150 ${
+            active ? "text-accent bg-accent/10" : "text-muted hover:text-text hover:bg-gray-100"
+          }`}
+        >
+          {label}
+        </Link>
+      );
+    }
     return (
       <Link
         to={to}
@@ -33,6 +48,14 @@ export default function Layout({ children }) {
       </Link>
     );
   };
+
+  const navItems = [
+    ["/dashboard", "Dashboard"],
+    ["/discover", "Discover"],
+    ["/rooms", "Rooms"],
+    ["/messages", "Messages"],
+    ["/appointments", "Appointments"],
+  ];
 
   return (
     <div className="min-h-screen bg-bg">
@@ -49,12 +72,9 @@ export default function Layout({ children }) {
             <span className="text-text font-semibold tracking-tight">Research Vault</span>
           </Link>
 
+          {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-6">
-            {navLink("/dashboard", "Dashboard")}
-            {navLink("/discover", "Discover")}
-            {navLink("/rooms", "Rooms")}
-            {navLink("/messages", "Messages")}
-            {navLink("/appointments", "Appointments")}
+            {navItems.map(([to, label]) => navLink(to, label))}
           </nav>
 
           <div className="flex items-center gap-1">
@@ -72,12 +92,34 @@ export default function Layout({ children }) {
             </Link>
             <button
               onClick={handleLogout}
-              className="ml-1 text-sm text-muted hover:text-danger px-3 py-1.5 rounded-lg hover:bg-red-50 transition-all duration-150"
+              className="hidden md:block ml-1 text-sm text-muted hover:text-danger px-3 py-1.5 rounded-lg hover:bg-red-50 transition-all duration-150"
+            >
+              Sign out
+            </button>
+
+            {/* Hamburger — mobile only */}
+            <button
+              onClick={() => setMobileOpen(o => !o)}
+              className="md:hidden w-9 h-9 flex items-center justify-center text-muted hover:text-text hover:bg-gray-100 rounded-lg transition-all duration-150 ml-1"
+              aria-label="Toggle menu"
+            >
+              {mobileOpen ? <XIcon /> : <MenuIcon />}
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile dropdown */}
+        {mobileOpen && (
+          <div className="md:hidden border-t border-border/60 bg-white/95 backdrop-blur-md px-4 py-3 space-y-1">
+            {navItems.map(([to, label]) => navLink(to, label, true))}
+            <button
+              onClick={() => { setMobileOpen(false); handleLogout(); }}
+              className="block w-full text-left px-4 py-3 text-sm font-medium text-muted hover:text-danger hover:bg-red-50 rounded-lg transition-colors duration-150"
             >
               Sign out
             </button>
           </div>
-        </div>
+        )}
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-8 animate-fade-up">{children}</main>
@@ -100,6 +142,22 @@ function UserIcon() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+    </svg>
+  );
+}
+
+function MenuIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+function XIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
     </svg>
   );
 }
